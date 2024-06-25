@@ -539,8 +539,7 @@ class TransformerEncoder(nn.Module):
             if position_ids is not None:
                 pos_text = get_sine_pos_embed(
                     position_ids[..., None], num_pos_feats=256, exchange_xy=False
-                )
-            pos_text = pos_text.to(src.dtype)
+                ).to(src.dtype)
 
         # main process
         for layer_id, layer in enumerate(self.layers):

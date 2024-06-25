@@ -131,6 +131,48 @@ class WindowAttention(nn.Module):
         trunc_normal_(self.relative_position_bias_table, std=0.02)
         self.softmax = nn.Softmax(dim=-1)
 
+    # def forward(self, x, mask=None):
+    #     """Forward function.
+    #     Args:
+    #         x: input features with shape of (num_windows*B, N, C)
+    #         mask: (0/-inf) mask with shape of (num_windows, Wh*Ww, Wh*Ww) or None
+    #     """
+    #     B_, N, C = x.shape
+    #     qkv = (
+    #         self.qkv(x)
+    #         .reshape(B_, N, 3, self.num_heads, C // self.num_heads)
+    #         .permute(2, 0, 3, 1, 4)
+    #     )
+    #     q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
+
+    #     q = q * self.scale
+    #     attn = q @ k.transpose(-2, -1)
+
+    #     relative_position_bias = self.relative_position_bias_table[
+    #         self.relative_position_index.view(-1)
+    #     ].view(
+    #         self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1
+    #     )  # Wh*Ww,Wh*Ww,nH
+    #     relative_position_bias = relative_position_bias.permute(
+    #         2, 0, 1
+    #     ).contiguous()  # nH, Wh*Ww, Wh*Ww
+    #     attn = attn + relative_position_bias.unsqueeze(0)
+
+    #     if mask is not None:
+    #         nW = mask.shape[0]
+    #         attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(1).unsqueeze(0)
+    #         attn = attn.view(-1, self.num_heads, N, N)
+    #         attn = self.softmax(attn)
+    #     else:
+    #         attn = self.softmax(attn)
+
+    #     attn = self.attn_drop(attn)
+
+    #     x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
+    #     x = self.proj(x)
+    #     x = self.proj_drop(x)
+    #     return x
+
     def forward(self, x, mask=None):
         """Forward function.
         Args:
@@ -145,9 +187,6 @@ class WindowAttention(nn.Module):
         )
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
 
-        q = q * self.scale
-        attn = q @ k.transpose(-2, -1)
-
         relative_position_bias = self.relative_position_bias_table[
             self.relative_position_index.view(-1)
         ].view(
@@ -156,19 +195,13 @@ class WindowAttention(nn.Module):
         relative_position_bias = relative_position_bias.permute(
             2, 0, 1
         ).contiguous()  # nH, Wh*Ww, Wh*Ww
-        attn = attn + relative_position_bias.unsqueeze(0)
-
+        attn_bias = relative_position_bias.unsqueeze(0)
         if mask is not None:
-            nW = mask.shape[0]
-            attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(1).unsqueeze(0)
-            attn = attn.view(-1, self.num_heads, N, N)
-            attn = self.softmax(attn)
-        else:
-            attn = self.softmax(attn)
+            attn_bias = mask.to(dtype=x.dtype).unsqueeze(1) + attn_bias
 
-        attn = self.attn_drop(attn)
+        x = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=attn_bias, dropout_p=0.0, is_causal=False, scale=self.scale)
 
-        x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
+        x = x.transpose(1, 2).reshape(B_, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -416,6 +449,8 @@ class BasicLayer(nn.Module):
         # calculate attention mask for SW-MSA
         Hp = int(np.ceil(H / self.window_size)) * self.window_size
         Wp = int(np.ceil(W / self.window_size)) * self.window_size
+        # Hp = H//self.window_size * self.window_size
+        # Wp = W//self.window_size * self.window_size
         img_mask = torch.zeros((1, Hp, Wp, 1), device=x.device, dtype=x.dtype)  # 1 Hp Wp 1
         h_slices = (
             slice(0, -self.window_size),

@@ -112,7 +112,6 @@ def gen_encoder_output_proposals(
 
     # output_memory = output_memory.masked_fill(memory_padding_mask.unsqueeze(-1), float('inf'))
     # output_memory = output_memory.masked_fill(~output_proposals_valid, float('inf'))
-
     output_proposals = output_proposals.to(output_memory.dtype)
     return output_memory, output_proposals
 

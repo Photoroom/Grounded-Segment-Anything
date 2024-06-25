@@ -112,8 +112,8 @@ def resize(image, target, size, max_size=None):
             return size[::-1]
         else:
             return get_size_with_aspect_ratio(image_size, size, max_size)
-
-    size = get_size(image.size, size, max_size)
+    # print(image.shape, type(image.shape[:2]))
+    size = get_size(tuple(image.shape[1:][::-1]), size, max_size)
     rescaled_image = F.resize(image, size)
 
     if target is None:
@@ -280,7 +280,7 @@ class Normalize(object):
         self.std = std
 
     def __call__(self, image, target=None):
-        image = F.normalize(image, mean=self.mean, std=self.std)
+        image =  (image - self.mean)/self.std
         if target is None:
             return image, None
         target = target.copy()
